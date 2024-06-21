@@ -1,0 +1,261 @@
+%%capture
+!pip install -U xarray[complete]
+!pip install erddapy
+!pip install rasterio
+!pip install cartopy
+%%capture
+!pip install salem
+!pip install s3fs
+!pip install Intake-esm
+
+# a maneira de usar o erddap-python é demonstrada abaixo
+from erddapy import ERDDAP
+
+e = ERDDAP(
+  server="https://coastwatch.pfeg.noaa.gov/erddap",  #o escolhido foi esse nesse estudo, mas é claro que seria possível utilizar outras fontes, também seguras e interessantes para análise
+  protocol="griddap",
+  response="opendap"
+)
+e.dataset_id = "chirps20GlobalMonthlyP05"  #esse foi o dataset escolhido
+ds = e.to_xarray() # e agora converto para um dataset
+
+# vamos extrair um slice da zona da bacia Xingu
+lat=slice(-20, 0)
+lon=slice(-65, -45)
+AS_precip = ds.sel(longitude=lon,latitude=lat) #essa variável terá os valores apenas da região escil
+
+!wget https://github.com/andrebelem/pythonverse/raw/main/datasets/SNIRH_UGRHs_2020.zip
+
+import geopandas as gpd
+
+bacias = gpd.read_file('SNIRH_UGRHs_2020.zip')
+xingu = bacias[bacias.NOME=='Xingu e Interbacias Xingu-Tapajós']
+
+import salem
+
+myprecip = AS_precip['precip'].salem.subset(shape=xingu_shape)
+myprecip_clean = myprecip.salem.roi(shape=xingu_shape)
+
+import matplotlib.pyplot as plt
+import numpy as np
+import cartopy.crs as ccrs
+import pandas as pd
+from cartopy.feature import NaturalEarthFeature, LAND, COASTLINE
+
+plt.figure(figsize=(14,6))
+ax = plt.axes(projection=ccrs.PlateCarree())
+myprecip_clean.sel(time='2020-01-01').plot(ax=ax,
+
+            transform=ccrs.PlateCarree(), x='longitude', y='latitude',
+            cmap='PuRd', # altere os valores de vmax para ver o que acontece
+            add_colorbar=True)
+
+states = NaturalEarthFeature(category='cultural', scale='50m', facecolor='none',
+                             name='admin_1_states_provinces_lines')
+contries = NaturalEarthFeature(category='cultural', scale='50m', facecolor='none',
+                             name='admin_0_countries')
+
+ax.add_feature(states, facecolor='none', edgecolor='black')
+ax.add_feature(contries, facecolor='none', edgecolor='black')
+
+xingu_shape.geometry.plot(ax=ax,facecolor='none',edgecolor='pink',linewidth=2)
+
+ax.coastlines()
+
+myprecip_timeseries = myprecip.mean(dim=('latitude','longitude'))
+myprecip_timeseries.plot()
+
+df_precipp = myprecip_timeseries.to_dataframe()
+df1_precip = df_precipp.drop(index="2024-02-01")
+df2_precip = df1_precip.drop(index="2024-03-01")
+df_precip = df2_precip.drop(index="2024-04-01")
+df_precip
+
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+
+# Usando o matplotlib, vou plotar os dois gráficos
+fig, ax1 = plt.subplots(figsize=(14,6))
+
+ax1.plot(df_precip, 'b-', label='Precipitação')
+
+# Adicionando uma linha de tendência linear até 2024
+precip_years = df_precip.index.year
+
+precip_coef = np.polyfit(precip_years, df_precip.precip, 1)
+
+precip_trend = np.poly1d(precip_coef)
+
+# Calculando a tendência linear para o período de 1981 a 2024
+years_to_plot = pd.date_range(start='1981-01-01', end='2024-01-01', freq='Y')
+precip_trend_values = precip_trend(years_to_plot.year)
+
+# Plotando as linhas de tendência
+ax1.plot(years_to_plot, precip_trend_values, 'r--', label='Média')
+
+ax1.set_xlabel('Anos')
+ax1.set_ylabel('Precipitação [mm/mes]', color='b')
+plt.title('Valores de Precipitação e sua tendência média na Bacia do Xingu (1980-2024)')
+
+# Adicionando as legendas fora do gráfico
+ax1.legend(loc='upper left')
+
+plt.show()
+
+df_precip['anom'] = df_precip - df_precip.mean() #para adicionar os valores de anomalia no dataframe
+
+# Anomalia
+
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+
+# Usando o matplotlib, vou plotar os dois gráficos
+fig, ax1 = plt.subplots(figsize=(12,6))
+
+ax1.plot(df_precip.anom, 'b-', label='anomalia')
+
+# Adicionando uma linha de tendência linear até 2024
+precip_years = df_precip.index.year
+
+precip_coef = np.polyfit(precip_years, df_precip.precip, 1)
+
+precip_trend = np.poly1d(precip_coef)
+
+# Calculando a tendência linear para o período de 1981 a 2024
+years_to_plot = pd.date_range(start='1981-01-01', end='2024-01-01', freq='Y')
+precip_trend_values = precip_trend(years_to_plot.year)
+
+# Plotando as linhas de tendência
+ax1.plot(years_to_plot, precip_trend_values, 'r--', label='Precip Trend')
+
+ax1.set_xlabel('Anos')
+ax1.set_ylabel('Precipitação [mm/mes]', color='b')
+
+# Adicionando as legendas fora do gráfico
+ax1.legend(loc='upper left')
+
+plt.show()
+
+________________________________________________________
+#Temperatura
+
+%%capture
+!pip install erddapy
+from erddapy import ERDDAP
+
+e = ERDDAP(
+  server="https://coastwatch.pfeg.noaa.gov/erddap",
+  protocol="griddap",
+  response="opendap" # a ideia aqui é usar opendap para poder fazer um subset posterior
+)
+e.dataset_id = "esrlNcepRe"
+dtt = e.to_xarray() # e agora converto para um dataset
+
+dta = dtt.sel(time=slice('1981-01-01', '2024-01-01')) # para recortar apenas os dados de interesse. nesse caso, os anos deed 1981-2024 (50 anos)
+dt = dta.rename_vars({'air': 'Temperatura'})
+
+from pickle import DICT
+
+dt.coords['longitude'] = (dt.coords['longitude'] + 180) % 360 - 180
+at= dt.sortby(dt.longitude)
+
+!wget https://github.com/andrebelem/pythonverse/raw/main/datasets/SNIRH_UGRHs_2020.zip
+
+import geopandas as gpd
+
+bacias = gpd.read_file('SNIRH_UGRHs_2020.zip')
+xingu = bacias[bacias.NOME=='Xingu e Interbacias Xingu-Tapajós']
+
+import salem
+
+# Definir a função de conversão de Kelvin para Celsius
+def kelvin_to_celsius(temperatura_kelvin):
+    return temperatura_kelvin - 273.15
+
+mytempp = at['Temperatura'].salem.subset(shape=xingu_shape) #plotando os dados da variável ["air"] das coordenadas e dentro do shape de xingu
+mytemp = mytempp.pipe(kelvin_to_celsius)
+mytemp_clean = mytemp.salem.roi(shape=xingu_shape)
+
+import matplotlib.pyplot as plt
+import numpy as np
+import cartopy.crs as ccrs
+import pandas as pd
+from cartopy.feature import NaturalEarthFeature, LAND, COASTLINE
+
+plt.figure(figsize=(14,6))
+ax = plt.axes(projection=ccrs.PlateCarree())
+mytemp_clean.sel(time='2024-01-01').plot(ax=ax,
+
+            transform=ccrs.PlateCarree(), x='longitude', y='latitude',
+            cmap='PuRd',
+            add_colorbar=True)
+
+states = NaturalEarthFeature(category='cultural', scale='50m', facecolor='none',
+                             name='admin_1_states_provinces_lines')
+contries = NaturalEarthFeature(category='cultural', scale='50m', facecolor='none',
+                             name='admin_0_countries')
+
+ax.add_feature(states, facecolor='none', edgecolor='black')
+ax.add_feature(contries, facecolor='none', edgecolor='black')
+
+xingu_shape.geometry.plot(ax=ax,facecolor='none',edgecolor='pink',linewidth=2)  #o comando "linewidth" trata da grossura da linha do shape xingu
+
+ax.coastlines()
+
+mytemp_timeseries = mytemp.mean(dim=('longitude','latitude'))
+mytemp_timeseries.plot()
+dtt_temp = mytemp_timeseries.to_dataframe()
+dtt_temp
+
+import pandas as pd
+dt_temp = dtt_temp.groupby([dtt_temp.index.year, dtt_temp.index.month]).mean()
+dt_temp.index.names = ['Ano', 'Mês']
+dt_temp.index = [pd.Timestamp(f"{year}-{month:02d}-01") for year, month in dt_temp.index]
+
+# Renomear a coluna do índice
+dt_temp.index.name = 'time'
+
+print("Média de temperatura de cada mês:")
+dt_temp
+
+from matplotlib import pyplot as plt
+dt_temp['Temperatura'].plot(kind='line', figsize=(8, 4), title='Temperatura')
+plt.gca().spines[['top', 'right']].set_visible(False)
+
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+
+# Usando o matplotlib, vou plotar os dois gráficos
+fig, ax1 = plt.subplots(figsize=(16,6))
+
+ax1.plot(dt_temp, 'b-', label='Temperatura')
+
+# Adicionando uma linha de tendência linear até 2024
+temp_years = dt_temp.index.year
+
+temp_coef = np.polyfit(temp_years, dt_temp.Temperatura, 1)
+
+temp_trend = np.poly1d(temp_coef)
+
+# Calculando a tendência linear para o período de 1981 a 2024
+years_to_plot = pd.date_range(start='1981-01-01', end='2024-01-01', freq='Y')
+temp_trend_values = temp_trend(years_to_plot.year)
+
+# Plotando as linhas de tendência
+ax1.plot(years_to_plot, temp_trend_values, 'r--', label='Média')
+
+ax1.set_xlabel('Anos')
+ax1.set_ylabel('Temperatura °C', color='b')
+plt.title('Valores de Temperatura e sua tendência média na Bacia do Xingu (1970-2020)')
+
+# Adicionando as legendas fora do gráfico
+ax1.legend(loc='upper left')
+
+plt.show()
+
+# Remove a coluna 'anom' do dataframe df_precip (foi adicionada a coluna de anomalia no código para calcular a mesma)
+precip = df_precip.drop(columns=['anom'])
+precip
